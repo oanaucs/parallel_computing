@@ -10,24 +10,24 @@ __global__ void kernelAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
 {
    //TODO: Hier soll die GPU A*x=y berechnen
    int tid_x = threadIdx.x;
-   int tid_y = threadIdx.y;
+   // int tid_y = threadIdx.y;
 
    int bid_x = blockIdx.x;
-   int bid_y = blockIdx.y;
+   // int bid_y = blockIdx.y;
 
    int bdim_x = blockDim.x;
-   int bdim_y = blockDim.y;
+   // int bdim_y = blockDim.y;
 
 
    int i = tid_x + bid_x * bdim_x;
-   int j = tid_y + bid_y * bdim_y;
+   // int j = tid_y + bid_y * bdim_y;
 
 
    y[i] = 0;
-   // for (unsigned int k = 0; k < size; ++k)
-   // {
-   y[i] += a[i * size + j] * x[j];
-   // }
+   for (unsigned int j = 0; j < size; ++j)
+   {
+      y[i] += a[i * size + j] * x[j];
+   }
 }
 
 __global__ void kernelATx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
