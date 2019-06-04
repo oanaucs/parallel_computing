@@ -6,6 +6,7 @@
 #include <assert.h>
 
 #include <cooperative_groups.h>
+using namespace cooperative_groups;
 
 // CUDA runtime
 #include <cuda_runtime.h>
@@ -14,36 +15,56 @@
 
 const int maxThreadsPerBlock = 1024;
 
+__device__ DTYPE mult(DTYPE *a, DTYPE *x, int size)
+{
+    int tid_x = threadIdx.x;
+
+    int row = blockIdx.x;
+
+    int bid_y = blockIdx.y;
+
+    int bdim_x = blockDim.x;
+
+    int col = tid_x + bid_y * bdim_x;
+
+    return a[row * size + col] * x[col];
+}
+
+__device__ DTYPE reduce(thread_group g, DTYPE *cache, DTYPE val)
+{
+    int gtid_x = g.thread_rank();
+    cache[gtid_x] = val;
+    g.sync();
+    for (int k = g.size() / 2; k > 0; k >>= 1)
+    {
+       
+        if (gtid_x < k)
+        {
+            cache[gtid_x] += cache[gtid_x + k];
+        }
+        g.sync();
+    }
+
+    return cache[0];
+}
+
 __global__ void kernelAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
 {
     __shared__ DTYPE cache[maxThreadsPerBlock];
 
-    int tid_x = threadIdx.x;
+    DTYPE val = mult(a, x, size);
 
-    int row = blockIdx.x;
-    int bid_y = blockIdx.y;
+    thread_group g = this_thread_block();
+    auto tileIdx = g.thread_rank() / 32;
+    DTYPE* t = &cache[32 * tileIdx];
 
-    int bdim_x = blockDim.x;
-    //int bdim_y = blockDim.y;
+    thread_group tile = tiled_partition(g, 32);
 
-    //int row = tid_x + bid_x * bdim_x;
-    int col = tid_x + bid_y * bdim_x;
-
-    cache[tid_x] = a[row * size + col] * x[col];
-    __syncthreads();
-
-    for (int k = bdim_x / 2; k > 0; k >>= 1)
-    {
-        if (tid_x < k)
-        {
-            cache[tid_x] += cache[tid_x + k];
-        }
-        __syncthreads();
-    }
+    DTYPE sum = reduce(tile, t, val);
 
     //printf("%f \n", cache[0]);
 
-    if (tid_x == 0) atomicAdd(&y[row], cache[0]);
+    if (tile.thread_rank() == 0) atomicAdd(&y[blockIdx.x], sum);
 
     //if (row < size && col < size) atomicAdd(&y[row], a[row * size + col] * x[col]);
 }
