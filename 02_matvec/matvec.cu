@@ -6,28 +6,59 @@
 
 #define DTYPE float
 
+const int maxThreadsPerBlock = 2048;
+
 __global__ void kernelAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
 {
-   //TODO: Hier soll die GPU A*x=y berechnen
+   
+   __shared__ DTYPE cache[maxThreadsPerBlock];
+
    int tid_x = threadIdx.x;
-   // int tid_y = threadIdx.y;
+   int tid_y = threadIdx.y;
 
    int bid_x = blockIdx.x;
-   // int bid_y = blockIdx.y;
 
    int bdim_x = blockDim.x;
-   // int bdim_y = blockDim.y;
-
 
    int i = tid_x + bid_x * bdim_x;
-   // int j = tid_y + bid_y * bdim_y;
 
+   // printf("tidx, bidx, bdimx, i %d %d %d %d \n", tid_x, bid_x, bdim_x, i);
 
-   y[i] = 0;
+   // y[i] = 0;
+   // for (unsigned int j = 0; j < size; ++j)
+   // {
+   // 	y[i] += a[i * size + j] * x[j];
+   // }
+
+   DTYPE tmp;
+
    for (unsigned int j = 0; j < size; ++j)
    {
-      y[i] += a[i * size + j] * x[j];
+      cache[i * size + j] = a[i * size + j] * x[j];
    }
+   __syncthreads();
+
+   // cache[i] = tmp;
+
+   // printf("i, cache: %d  %f \n", i, cache[i]);
+
+   for (int k = bdim_x/2; k > 0; k /= 2)
+   {
+   		if (i < k) 
+		{
+			cache[i] += cache[i+k]
+			// printf("%f \n", cache[i]);
+		}
+		__syncthreads();
+   }
+
+   printf("cache[0]: %f \n", cache[0]);
+
+   if (tid_x == 0)
+   {
+   		y[i] = cache[0];
+   }
+
 }
 
 __global__ void kernelATx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
