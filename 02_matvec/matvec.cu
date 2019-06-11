@@ -82,7 +82,7 @@ __global__ void kernelAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
     DTYPE val = multAx(a, x, size);
 
     thread_group g = this_thread_block();
-    auto tileIdx = g.thread_rank() / 32;
+    int tileIdx = g.thread_rank() / 32;
     DTYPE* t = &cache[32 * tileIdx];
 
     thread_group tile = tiled_partition(g, 32);
@@ -115,7 +115,7 @@ __global__ void kernelATx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
     DTYPE val = multATx(a, x, size);
 
     thread_group g = this_thread_block();
-    auto tileIdx = g.thread_rank() / 32;
+    int tileIdx = g.thread_rank() / 32;
     DTYPE* t = &cache[32 * tileIdx];
 
     thread_group tile = tiled_partition(g, 32);
