@@ -75,6 +75,23 @@ __global__ void kernelSimpleAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
     atomicAdd(&y[row], a[row * size + col] * x[col]);
 }
 
+__global__ void kernelAxShfl(DTYPE *a, DTYPE *x, DTYPE *y, int size)
+{
+    __shared__ DTYPE cache[maxThreadsPerBlock];
+
+    DTYPE val = multAx(a, x, size);
+
+    thread_group g = this_thread_block();
+    int tileIdx = g.thread_rank() / 32;
+    DTYPE* t = &cache[32 * tileIdx];
+
+    thread_block_tile<tileSize> tile = tiled_partition<tileSize>(this_thread_block());
+
+    DTYPE sum = reduce_sum_shfl(tile, val);
+
+    if (tile.thread_rank() == 0) atomicAdd(&y[blockIdx.x], sum);
+}
+
 __global__ void kernelAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
 {
     __shared__ DTYPE cache[maxThreadsPerBlock];
@@ -86,16 +103,10 @@ __global__ void kernelAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
     DTYPE* t = &cache[32 * tileIdx];
 
     thread_group tile = tiled_partition(g, 32);
-    //thread_block_tile<tileSize> tile = tiled_partition<tileSize>(this_thread_block());
 
     DTYPE sum = reduce(tile, t, val);
-    //DTYPE sum = reduce_sum_shfl(tile, val);
-
-    //printf("bidx %d sum %f \n", blockIdx.x, sum);
 
     if (tile.thread_rank() == 0) atomicAdd(&y[blockIdx.x], sum);
-
-    //if (row < size && col < size) atomicAdd(&y[row], a[row * size + col] * x[col]);
 }
 
 
@@ -119,12 +130,25 @@ __global__ void kernelATx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
     DTYPE* t = &cache[32 * tileIdx];
 
     thread_group tile = tiled_partition(g, 32);
-    //thread_block_tile<tileSize> tile = tiled_partition<tileSize>(this_thread_block());
 
     DTYPE sum = reduce(tile, t, val);
-    //DTYPE sum = reduce_sum_shfl(tile, val);
 
-    //printf("bidx %d sum %f \n", blockIdx.x, sum);
+    if (tile.thread_rank() == 0) atomicAdd(&y[blockIdx.x], sum);
+}
+
+__global__ void kernelATxShfl(DTYPE *a, DTYPE *x, DTYPE *y, int size)
+{
+    __shared__ DTYPE cache[maxThreadsPerBlock];
+
+    DTYPE val = multATx(a, x, size);
+
+    thread_group g = this_thread_block();
+    int tileIdx = g.thread_rank() / 32;
+    DTYPE* t = &cache[32 * tileIdx];
+
+    thread_block_tile<tileSize> tile = tiled_partition<tileSize>(this_thread_block());
+
+    DTYPE sum = reduce_sum_shfl(tile, val);
 
     if (tile.thread_rank() == 0) atomicAdd(&y[blockIdx.x], sum);
 }
@@ -230,10 +254,9 @@ int main(int argc, char**argv)
 
     // Set CUDA cache config
     // 16kB shared / 48kB local
-    // cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
+    //cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
     // 48kB shared / 16kB local
     cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
-    //cudaDeviceSetCacheConfig(cudaFuncCachePreferNone);
 
     // Create CUDA Events
     cudaEventCreate(&start);
@@ -256,10 +279,11 @@ int main(int argc, char**argv)
     // Configurate CUDA kernel
     dim3 threads(t);
     dim3 grid(size, size / threads.x);
-#if 0
+#if 1
     // execute kernelAx and measure Performance
     cudaEventRecord(start, 0);
-    kernelAx<<<grid, threads>>>(a_dev, x_dev, y_dev, size);
+    //kernelAx<<<grid, threads>>>(a_dev, x_dev, y_dev, size);
+    kernelAxShfl<<<grid, threads>>>(a_dev, x_dev, y_dev, size);
     cudaEventRecord(end, 0);
     cudaEventSynchronize(end);
 
@@ -275,12 +299,16 @@ int main(int argc, char**argv)
     hostAx(a_host, x_host, yh_host, size);
     checkResult(yh_host, yd_host, size);
     printf("\n");
+
+    cudaEventElapsedTime(&dth_time, start, end);
+
     
     ////////////////////////////////////////////////////////////////////////
 #else
     // execute kernelATx and measure Performance
     cudaEventRecord(start, 0);
-    kernelATx <<<grid, threads >>>(a_dev, x_dev, y_dev, size);
+    //kernelATx <<<grid, threads >>>(a_dev, x_dev, y_dev, size);
+    kernelATxShfl <<<grid, threads >>>(a_dev, x_dev, y_dev, size);
     cudaEventRecord(end, 0);
     cudaEventSynchronize(end);
 
