@@ -1,0 +1,271 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+			[
+				"shuf",
+				"shuffle_pool"
+			],
+			[
+				"sampl",
+				"sample_fn"
+			],
+			[
+				"train_once",
+				"train_once_args"
+			]
+		]
+	},
+	"buffers":
+	[
+		{
+			"file": "02_matvec/matvec.cu",
+			"settings":
+			{
+				"buffer_size": 7983,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		}
+	],
+	"build_system": "Packages/Python/Python.sublime-build",
+	"build_system_choices":
+	[
+		[
+			[
+				[
+					"Packages/Python/Python.sublime-build",
+					""
+				],
+				[
+					"Packages/Python/Python.sublime-build",
+					"Syntax Check"
+				]
+			],
+			[
+				"Packages/Python/Python.sublime-build",
+				""
+			]
+		]
+	],
+	"build_varint": "",
+	"command_palette":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"console":
+	{
+		"height": 0.0,
+		"history":
+		[
+		]
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"expanded_folders":
+	[
+		"/home/oanaucs/repos/parallel_computing",
+		"/home/oanaucs/repos/parallel_computing/02_matvec"
+	],
+	"file_history":
+	[
+		"/home/oanaucs/repos/parallel_computing/matvec.cu",
+		"/home/oanaucs/repos/al_benchmark/models/cifarnet.py",
+		"/home/oanaucs/repos/al_benchmark/input_pipeline/cifar_dataset.py",
+		"/home/oanaucs/repos/al_benchmark/training/active_learner.py",
+		"/home/oanaucs/repos/al_benchmark/input_pipeline/dataset_base.py",
+		"/home/oanaucs/repos/al_benchmark/evaluation/eval.py",
+		"/home/oanaucs/repos/al_benchmark/run_active_learner.py",
+		"/home/oanaucs/repos/awp_network_quantization/train/train_cifar.py",
+		"/home/oanaucs/repos/awp_network_quantization/train/train_image_classifier.py",
+		"/home/oanaucs/repos/models/research/slim/datasets/download_and_convert_imagenet.sh",
+		"/home/oanaucs/repos/models/official/resnet/imagenet_test.py",
+		"/home/oanaucs/repos/models/official/resnet/imagenet_main.py",
+		"/home/oanaucs/repos/models/research/slim/datasets/download_imagenet.sh"
+	],
+	"find":
+	{
+		"height": 24.0
+	},
+	"find_in_files":
+	{
+		"height": 0.0,
+		"where_history":
+		[
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": false,
+		"find_history":
+		[
+			"sample",
+			"sample_fn",
+			"num samples",
+			"dataset",
+			"sample_fn",
+			"loss",
+			"data",
+			"batch_s",
+			"sample_uni",
+			"opts",
+			"loss",
+			"preprocessing",
+			"loss"
+		],
+		"highlight": true,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": false,
+		"replace_history":
+		[
+		],
+		"reverse": false,
+		"show_context": true,
+		"use_buffer2": true,
+		"whole_word": false,
+		"wrap": true
+	},
+	"groups":
+	[
+		{
+			"selected": 0,
+			"sheets":
+			[
+				{
+					"buffer": 0,
+					"file": "02_matvec/matvec.cu",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 7983,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								2711,
+								2711
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C.sublime-syntax",
+							"tab_size": 3,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 720.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 0,
+					"type": "text"
+				}
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 24.0
+	},
+	"input":
+	{
+		"height": 0.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": true,
+	"output.autopep8":
+	{
+		"height": 108.0
+	},
+	"output.exec":
+	{
+		"height": 321.0
+	},
+	"output.find_results":
+	{
+		"height": 0.0
+	},
+	"pinned_build_system": "",
+	"project": "matvec.sublime-project",
+	"replace":
+	{
+		"height": 44.0
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_symbol":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"selected_group": 0,
+	"settings":
+	{
+	},
+	"show_minimap": true,
+	"show_open_files": false,
+	"show_tabs": true,
+	"side_bar_visible": true,
+	"side_bar_width": 231.0,
+	"status_bar_visible": true,
+	"template_settings":
+	{
+	}
+}
