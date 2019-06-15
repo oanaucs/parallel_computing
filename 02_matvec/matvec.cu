@@ -103,28 +103,45 @@ __device__ int reduce_sum_shfl(thread_block_tile<tileSize> g, int val)
 // }
 
 
-
-__global__ void kernelReduceSimple(DTYPE *a, DTYPE *y, int size, int stride)
+__global__ void kernelReduceSimple(DTYPE *a, DTYPE *y, int size)
 {
+
     __shared__ DTYPE cache[maxThreadsPerBlock * maxThreadsPerBlock];
+    size_t index_src = (threadIdx.y + blockDim.y * blockIdx.y) * size + blockIdx.x * blockDim.x + threadIdx.x;
+    size_t index_dst = (threadIdx.y + blockDim.y * blockIdx.y) * size + blockIdx.x;
 
-    cache[threadIdx.y * blockDim.y + threadIdx.x] = a[(blockDim.y + threadIdx.y) * size + blockDim.x * 2 * blockIdx.x + threadIdx.x + stride];
 
-    for (int k = blockDim.x; k > 0; k >>= 1)
+    cache[threadIdx.x + threadIdx.y * maxThreadsPerBlock] = a[index_src];
+
+    // printf("a %f \n", cache[threadIdx.x + threadIdx.y * maxThreadsPerBlock]);
+
+
+    for (int k = blockDim.x / 2; k > 0; k >>= 1)
     {
-        cache[threadIdx.y * blockDim.y + threadIdx.x] +=  cache[threadIdx.y * blockDim.y + threadIdx.x + k];
-        // printf("cache %f \n", cache[threadIdx.y * blockDim.y + threadIdx.x]);
+        if (threadIdx.x < k)
+        {
+            cache[threadIdx.x + threadIdx.y * maxThreadsPerBlock] += cache[threadIdx.x  + threadIdx.y * maxThreadsPerBlock + k];
+        }
+        __syncthreads();
     }
+    if (threadIdx.x == 0) 
+    {
+        // printf("a %f \n", cache[0]);
 
-    // if (threadIdx.x == 0) 
-    // {
-    //     a[(blockIdx.y + threadIdx.y) * size + blockDim.x * blockIdx.x] = cache[0];
-    //     // printf("a[] %d \n", (blockIdx.y * blockDim.y + threadIdx.y) * size + blockIdx.x);
-    //     // printf("a %f \n", a[(blockIdx.y * blockDim.y + threadIdx.y) * size + blockIdx.x]);
+        if (gridDim.x == 1)
+        {
+            // printf("a %f \n", a[(threadIdx.y + blockDim.y * blockIdx.y) * size + threadIdx.x]);
+            // printf("a %f \n", cache[0]);
 
-    //     // atomicAdd(&y[blockIdx.y * blockDim.y + threadIdx.y], a[blockIdx.y * blockDim.y + threadIdx.y + blockIdx.x]);
-    // }
+            y[blockIdx.y * blockDim.y + threadIdx.y] = cache[0];
+        }
+        else{
+            a[index_dst] = cache[0];
+        }
+    }
 }
+
+
 
 __global__ void kernelSMAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
 {
@@ -148,32 +165,6 @@ __global__ void kernelSMAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
         // atomicAdd(&y[blockIdx.y * blockDim.y + threadIdx.y], cache[0]);
     }
 }
-
-
-// __global__ void kernelSMAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
-// {
-//     __shared__ DTYPE cache[maxThreadsPerBlock * maxThreadsPerBlock];
-
-//     cache[threadIdx.y * blockDim.y + threadIdx.x] = multAx(a, x, size);
-//     __syncthreads();
-
-//     for (int k = blockDim.x / 2; k > 0; k >>= 1)
-//     {
-//         if (threadIdx.x < k)
-//         {
-//             cache[threadIdx.y + threadIdx.x] += cache[threadIdx.y + threadIdx.x + k];
-//         }
-//         __syncthreads();
-//     }
-//     if (threadIdx.x == 0) 
-//     {
-//         a[(blockIdx.y * blockDim.y + threadIdx.y) * size + blockIdx.x] = cache[0];
-//         // printf("a[] %d \n", (blockIdx.y * blockDim.y + threadIdx.y) * size + blockIdx.x);
-//         // printf("a %f \n", a[(blockIdx.y * blockDim.y + threadIdx.y) * size + blockIdx.x]);
-
-//         // atomicAdd(&y[blockIdx.y * blockDim.y + threadIdx.y], a[blockIdx.y * blockDim.y + threadIdx.y + blockIdx.x]);
-//     }
-// }
 
 
 // __global__ void kernelSimpleAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
@@ -254,7 +245,7 @@ bool checkResult(DTYPE *yh, DTYPE *yd, int size)
 int main(int argc, char**argv)
 {
     int i = 1;
-    int t = 32;
+    int t = 4;
     // if (argc>1)
     // {
     //    i=atoi(argv[1]);
@@ -339,38 +330,36 @@ int main(int argc, char**argv)
     // }
 
 
-    // int values_to_reduce = size / t;
-    // int threads_x = min(values_to_reduce / 2, t);
-    // threads = dim3(threads_x, t);
-    // // threads = dim3(8, t);
-    // int grid_x = values_to_reduce / (threads.x * 2);
+    int values_to_reduce = size / t;
+    int threads_x = min(values_to_reduce, t);
+    threads = dim3(threads_x, t);
+    // threads = dim3(8, t);
+    int grid_x = values_to_reduce / threads.x;
 
-    // printf("\nvalues to reduce %d grid %d \n", values_to_reduce, grid_x);
-    // int stride = 0;
-    // while (grid_x >= 1)
-    // {
-    //     grid = dim3(grid_x, size / threads.y);
+    printf("\nvalues to reduce %d grid %d \n", values_to_reduce, grid_x);
 
-    //     printf("values to reduce %d grid_x %d stride %d threads.x %d\n", values_to_reduce, grid.x, stride, threads.x);
+    while (values_to_reduce > 1)
+    {
+        grid = dim3(grid_x, size / threads.y);
 
-    //     kernelReduceSimple<<<grid, threads>>>(a_dev, y_dev, size, stride);
-    //     cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+        printf("values to reduce %d grid_x %d s threads.x %d\n", values_to_reduce, grid.x, threads.x);
 
-    //     stride = threads_x * 2 - 1;
+        kernelReduceSimple<<<grid, threads>>>(a_dev, y_dev, size);
+        cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
 
-    //     values_to_reduce = grid_x;
-    //     threads_x = max(min(values_to_reduce / 2, t), 1);
-    //     threads = dim3(threads_x, t);
-    //     grid_x = values_to_reduce / (threads.x * 2);
+        values_to_reduce = grid_x;
+        threads_x = min(values_to_reduce, t);
+        threads = dim3(threads_x, t);
+        grid_x = values_to_reduce / threads.x;
         
-    //     std::cout <<  std::endl;
-    //     for(unsigned x = 0; x != size; ++x){
-    //          size_t index = x;
-    //          std::cout << copy_a_dev_to_host[index] << " ";
-    //     }
-    //     std::cout <<  std::endl;
+        std::cout <<  std::endl;
+        for(unsigned x = 0; x != size; ++x){
+             size_t index = x;
+             std::cout << copy_a_dev_to_host[index] << " ";
+        }
+        std::cout <<  std::endl;
 
-    // }
+    }
 
 // #if 1
 //     // execute kernelAx and measure Performance
