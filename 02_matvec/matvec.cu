@@ -4,7 +4,7 @@
 #include <math.h>
 #include <time.h>
 #include <assert.h>
-
+#include <iostream>
 #include <cooperative_groups.h>
 using namespace cooperative_groups;
 
@@ -13,25 +13,26 @@ using namespace cooperative_groups;
 
 #define DTYPE float
 
-const int maxThreadsPerBlock = 1024;
+const int maxThreadsPerBlock = 32;
 
 const int tileSize = 32;
 
+// __device__ DTYPE multAx(DTYPE *a, DTYPE *x, int size)
+// {
+//     int row = blockIdx.x;
+//     int col = threadIdx.x + blockIdx.y * blockDim.x;
+
+//     return a[row * size + col] * x[col];
+// }
+
 __device__ DTYPE multAx(DTYPE *a, DTYPE *x, int size)
 {
-    int row = blockIdx.x;
-    int col = threadIdx.x + blockIdx.y * blockDim.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
 
     return a[row * size + col] * x[col];
 }
 
-__device__ DTYPE multATx(DTYPE *a, DTYPE *x, int size)
-{
-    int col = blockIdx.x;
-    int row = blockDim.x * blockIdx.y + threadIdx.x;
-
-    return a[row * size + col] * x[row];
-}
 
 __device__ DTYPE reduce(thread_group g, DTYPE *cache, DTYPE val)
 {
@@ -67,131 +68,143 @@ __device__ int reduce_sum_shfl(thread_block_tile<tileSize> g, int val)
     return val;
 }
 
-__global__ void kernelGroupShflAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
+// __global__ void kernelGroupShflAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
+// {
+//     __shared__ DTYPE cache[maxThreadsPerBlock];
+
+//     DTYPE val = multAx(a, x, size);
+
+//     thread_group g = this_thread_block();
+//     int tileIdx = g.thread_rank() / 32;
+//     DTYPE* t = &cache[32 * tileIdx];
+
+//     thread_block_tile<tileSize> tile = tiled_partition<tileSize>(this_thread_block());
+
+//     DTYPE sum = reduce_sum_shfl(tile, val);
+
+//     if (tile.thread_rank() == 0) atomicAdd(&y[blockIdx.x], sum);
+// }
+
+// __global__ void kernelGroupAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
+// {
+//     __shared__ DTYPE cache[maxThreadsPerBlock];
+
+//     DTYPE val = multAx(a, x, size);
+
+//     thread_group g = this_thread_block();
+//     int tileIdx = g.thread_rank() / 32;
+//     DTYPE* t = &cache[32 * tileIdx];
+
+//     thread_group tile = tiled_partition(g, 32);
+
+//     DTYPE sum = reduce(tile, t, val);
+
+//     if (tile.thread_rank() == 0) atomicAdd(&y[blockIdx.x], sum);
+// }
+
+// __global__ void kernelReduceSimple(DTYPE *a, DTYPE *y, int size, int stride)
+// {
+
+//     __shared__ DTYPE cache[maxThreadsPerBlock * maxThreadsPerBlock];
+//     size_t index_dst = (threadIdx.y + blockDim.y * blockIdx.y) * size + blockIdx.x * blockDim.x * 2 + threadIdx.x;
+
+//     cache[threadIdx.x + threadIdx.y * blockDim.x] = a[index_dst];
+
+//     for (int k = blockDim.x; k > 0; k >>= 1)
+//     {
+//         if (threadIdx.x < k)
+//         {
+//             size_t index_src = index_dst + k + stride;
+//             cache[threadIdx.x  + threadIdx.y * blockDim.x] += a[index_src];
+//         }
+//         __syncthreads();
+//     }
+//     if (threadIdx.x == 0) 
+//     {
+//         printf("a %f \n", cache[0]);
+
+
+//         if (gridDim.x == 1)
+//         {
+//             // printf("a %f \n", a[(threadIdx.y + blockDim.y * blockIdx.y) * size + threadIdx.x]);
+//             y[blockIdx.y * blockDim.y + threadIdx.y] = cache[0];
+//         }
+//         else{
+//             a[index_dst] = cache[0];
+//         }
+//     }
+// }
+
+
+
+__global__ void kernelReduceSimple(DTYPE *a, DTYPE *x, DTYPE *y, int size)
 {
-    __shared__ DTYPE cache[maxThreadsPerBlock];
+    __shared__ DTYPE cache[maxThreadsPerBlock * maxThreadsPerBlock];
 
-    DTYPE val = multAx(a, x, size);
+    cache[threadIdx.y * blockDim.y + threadIdx.x] = multAx(a, x, size);
+    __syncthreads();
 
-    thread_group g = this_thread_block();
-    int tileIdx = g.thread_rank() / 32;
-    DTYPE* t = &cache[32 * tileIdx];
+    for (int k = blockDim.x / 2; k > 0; k >>= 1)
+    {
+        if (threadIdx.x < k)
+        {
+            cache[threadIdx.y + threadIdx.x] += cache[threadIdx.y + threadIdx.x + k];
+        }
+        __syncthreads();
+    }
+    if (threadIdx.x == 0) 
+    {
+        a[(blockIdx.y * blockDim.y + threadIdx.y) * size + blockIdx.x] = cache[0];
+        // printf("a[] %d \n", (blockIdx.y * blockDim.y + threadIdx.y) * size + blockIdx.x);
+        // printf("a %f \n", a[(blockIdx.y * blockDim.y + threadIdx.y) * size + blockIdx.x]);
 
-    thread_block_tile<tileSize> tile = tiled_partition<tileSize>(this_thread_block());
-
-    DTYPE sum = reduce_sum_shfl(tile, val);
-
-    if (tile.thread_rank() == 0) atomicAdd(&y[blockIdx.x], sum);
+        // atomicAdd(&y[blockIdx.y * blockDim.y + threadIdx.y], a[blockIdx.y * blockDim.y + threadIdx.y + blockIdx.x]);
+    }
 }
 
-__global__ void kernelGroupAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
-{
-    __shared__ DTYPE cache[maxThreadsPerBlock];
-
-    DTYPE val = multAx(a, x, size);
-
-    thread_group g = this_thread_block();
-    int tileIdx = g.thread_rank() / 32;
-    DTYPE* t = &cache[32 * tileIdx];
-
-    thread_group tile = tiled_partition(g, 32);
-
-    DTYPE sum = reduce(tile, t, val);
-
-    if (tile.thread_rank() == 0) atomicAdd(&y[blockIdx.x], sum);
-}
 
 __global__ void kernelSMAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
 {
-    __shared__ DTYPE cache[maxThreadsPerBlock];
+    __shared__ DTYPE cache[maxThreadsPerBlock * maxThreadsPerBlock];
 
-    cache[threadIdx.x] = multAx(a, x, size);
+    cache[threadIdx.y * blockDim.y + threadIdx.x] = multAx(a, x, size);
     __syncthreads();
 
     for (int k = blockDim.x / 2; k > 0; k >>= 1)
     {
         if (threadIdx.x < k)
         {
-            cache[threadIdx.x] += cache[threadIdx.x + k];
+            cache[threadIdx.y + threadIdx.x] += cache[threadIdx.y + threadIdx.x + k];
         }
         __syncthreads();
     }
+    if (threadIdx.x == 0) 
+    {
+        a[(blockIdx.y * blockDim.y + threadIdx.y) * size + blockIdx.x] = cache[0];
+        // printf("a[] %d \n", (blockIdx.y * blockDim.y + threadIdx.y) * size + blockIdx.x);
+        // printf("a %f \n", a[(blockIdx.y * blockDim.y + threadIdx.y) * size + blockIdx.x]);
 
-    if (threadIdx.x == 0) atomicAdd(&y[blockIdx.x], cache[0]);
+        // atomicAdd(&y[blockIdx.y * blockDim.y + threadIdx.y], a[blockIdx.y * blockDim.y + threadIdx.y + blockIdx.x]);
+    }
 }
+
+
+// __global__ void kernelSimpleAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
+// {
+//     int row = blockIdx.x;
+//     int col = blockDim.x * blockIdx.y + threadIdx.x;
+
+//     atomicAdd(&y[row], a[row * size + col] * x[col]);
+// }
+
 
 __global__ void kernelSimpleAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
 {
-    int row = blockIdx.x;
-    int col = blockDim.x * blockIdx.y + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
 
     atomicAdd(&y[row], a[row * size + col] * x[col]);
 }
-
-
-__global__ void kernelGroupShflATx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
-{
-    __shared__ DTYPE cache[maxThreadsPerBlock];
-
-    DTYPE val = multATx(a, x, size);
-
-    thread_group g = this_thread_block();
-    int tileIdx = g.thread_rank() / 32;
-    DTYPE* t = &cache[32 * tileIdx];
-
-    thread_block_tile<tileSize> tile = tiled_partition<tileSize>(this_thread_block());
-
-    DTYPE sum = reduce_sum_shfl(tile, val);
-
-    if (tile.thread_rank() == 0) atomicAdd(&y[blockIdx.x], sum);
-}
-
-
-__global__ void kernelGroupATx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
-{
-    __shared__ DTYPE cache[maxThreadsPerBlock];
-
-    DTYPE val = multATx(a, x, size);
-
-    thread_group g = this_thread_block();
-    int tileIdx = g.thread_rank() / 32;
-    DTYPE* t = &cache[32 * tileIdx];
-
-    thread_group tile = tiled_partition(g, 32);
-
-    DTYPE sum = reduce(tile, t, val);
-
-    if (tile.thread_rank() == 0) atomicAdd(&y[blockIdx.x], sum);
-}
-
-__global__ void kernelSMATx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
-{
-    __shared__ DTYPE cache[maxThreadsPerBlock];
-
-    cache[threadIdx.x] = multATx(a, x, size);
-    __syncthreads();
-
-    for (int k = blockDim.x / 2; k > 0; k >>= 1)
-    {
-        if (threadIdx.x < k)
-        {
-            cache[threadIdx.x] += cache[threadIdx.x + k];
-        }
-        __syncthreads();
-    }
-
-    if (threadIdx.x == 0) atomicAdd(&y[blockIdx.x], cache[0]);
-}
-
-
-__global__ void kernelSimpleATx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
-{
-    int col = blockIdx.x;
-    int row = blockDim.x * blockIdx.y + threadIdx.x;
-
-    atomicAdd(&y[row], a[row * size + col] * x[row]);
-}
-
 
 
 //Fill A (here with ones)
@@ -254,7 +267,7 @@ bool checkResult(DTYPE *yh, DTYPE *yd, int size)
 int main(int argc, char**argv)
 {
     int i = 1;
-    int t = 512;
+    int t = 32;
     // if (argc>1)
     // {
     //    i=atoi(argv[1]);
@@ -267,6 +280,7 @@ int main(int argc, char**argv)
     // }
     // printf("size %i \n", i);
     int size = 1024 * i;
+    // int size = 64;
     // Create data arrays for host
     DTYPE *a_host, *yd_host, *yh_host, *x_host;
     //and device
@@ -305,6 +319,10 @@ int main(int argc, char**argv)
     cudaMalloc((void**)&a_dev, size*size * sizeof(DTYPE));
     cudaMalloc((void**)&x_dev, size * sizeof(DTYPE));
     cudaMalloc((void**)&y_dev, size * sizeof(DTYPE));
+    
+    DTYPE* copy_a_dev_to_host = (DTYPE*)malloc(size * size * sizeof(DTYPE));
+
+
 
     // Host->Device Memcpy from A and x + performance measurement
     cudaEventRecord(start, 0);
@@ -316,19 +334,68 @@ int main(int argc, char**argv)
     cudaEventElapsedTime(&htd_time, start, end);
 
     // Configurate CUDA kernel
-    dim3 threads(t);
-    dim3 grid(size, size / threads.x);
-#if 1
-    // execute kernelAx and measure Performance
-    cudaEventRecord(start, 0);
-    //kernelSimpleAx<<<grid, threads>>>(a_dev, x_dev, y_dev, size);
-    kernelSMAx<<<grid, threads>>>(a_dev, x_dev, y_dev, size);
-    //kernelGroupAx<<<grid, threads>>>(a_dev, x_dev, y_dev, size);
-    //kernelGroupShflAx<<<grid, threads>>>(a_dev, x_dev, y_dev, size);
-    cudaEventRecord(end, 0);
-    cudaEventSynchronize(end);
+    dim3 threads(t,t);
+    dim3 grid(size / threads.x, size / threads.y);
 
-    cudaEventElapsedTime(&kernelA_time, start, end);
+    kernelSMAx<<<grid, threads>>>(a_dev, x_dev, y_dev, size);
+
+    cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+
+    // for(unsigned y = 0; y != size; ++y){
+    //     std::cout <<  std::endl << y << ": ";
+    std::cout <<  std::endl;
+         for(unsigned x = 0; x != size; ++x){
+
+             size_t index = x;
+             std::cout << copy_a_dev_to_host[index] << " ";
+         }
+    // }
+
+
+    int values_to_reduce = size / t;
+    int threads_x = min(values_to_reduce / 2, t);
+    threads = dim3(threads_x, t);
+    // threads = dim3(8, t);
+    int grid_x = values_to_reduce / (threads.x * 2);
+
+    printf("\nvalues to reduce %d grid %d \n", values_to_reduce, grid_x);
+    int stride = 0;
+    while (grid_x >= 1)
+    {
+        grid = dim3(grid_x, size / threads.y);
+
+        printf("values to reduce %d grid_x %d stride %d threads.x %d\n", values_to_reduce, grid.x, stride, threads.x);
+
+        kernelReduceSimple<<<grid, threads>>>(a_dev, y_dev, size, stride);
+        cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+
+        stride = threads_x * 2 - 1;
+
+        values_to_reduce = grid_x;
+        threads_x = max(min(values_to_reduce / 2, t), 1);
+        threads = dim3(threads_x, t);
+        grid_x = values_to_reduce / (threads.x * 2);
+        
+        std::cout <<  std::endl;
+        for(unsigned x = 0; x != size; ++x){
+             size_t index = x;
+             std::cout << copy_a_dev_to_host[index] << " ";
+        }
+        std::cout <<  std::endl;
+
+    }
+
+// #if 1
+//     // execute kernelAx and measure Performance
+//     cudaEventRecord(start, 0);
+//     //kernelSimpleAx<<<grid, threads>>>(a_dev, x_dev, y_dev, size);
+//     kernelSMAx<<<grid, threads>>>(a_dev, x_dev, y_dev, size);
+//     //kernelGroupAx<<<grid, threads>>>(a_dev, x_dev, y_dev, size);
+//     //kernelGroupShflAx<<<grid, threads>>>(a_dev, x_dev, y_dev, size);
+//     cudaEventRecord(end, 0);
+//     cudaEventSynchronize(end);
+
+//     cudaEventElapsedTime(&kernelA_time, start, end);
 
     // Device->Host Memcpy for y_dev -> yd_host
     cudaEventRecord(start, 0);
@@ -343,33 +410,6 @@ int main(int argc, char**argv)
 
     cudaEventElapsedTime(&dth_time, start, end);
 
-    
-    ////////////////////////////////////////////////////////////////////////
-#else
-    // execute kernelATx and measure Performance
-    cudaEventRecord(start, 0);
-    //kernelSimpleATx <<<grid, threads >>>(a_dev, x_dev, y_dev, size);
-    kernelSMATx <<<grid, threads >>>(a_dev, x_dev, y_dev, size);
-    //kernelGroupATx <<<grid, threads >>>(a_dev, x_dev, y_dev, size);
-    //kernelGroupShflATx <<<grid, threads >>>(a_dev, x_dev, y_dev, size);
-    cudaEventRecord(end, 0);
-    cudaEventSynchronize(end);
-
-    cudaEventElapsedTime(&kernelAT_time, start, end);
-
-    // Device->Host Memcpy for y_dev -> yd_host
-    cudaEventRecord(start, 0);
-    cudaMemcpy(yd_host, y_dev, size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
-    cudaEventRecord(end, 0);
-    cudaEventSynchronize(end);
-
-    cudaEventElapsedTime(&dth_time, start, end);
-
-    // Check ATx result
-    hostATx(a_host, x_host, yh_host, size);
-    checkResult(yh_host, yd_host, size);
-    printf("\n");
-    #endif
 
     printf("GPU timing in ms: h->d: %f kernelAx: %f kernelATx: %f d->h: %f\n", htd_time, kernelA_time, kernelAT_time, dth_time);
 
