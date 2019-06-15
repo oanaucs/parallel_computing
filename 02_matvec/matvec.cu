@@ -13,9 +13,9 @@ using namespace cooperative_groups;
 
 #define DTYPE float
 
-const int maxThreadsPerBlock = 32;
+const int maxThreadsPerBlock = 4;
 
-const int tileSize = 32;
+const int tileSize = 4;
 
 // __device__ DTYPE multAx(DTYPE *a, DTYPE *x, int size)
 // {
@@ -85,23 +85,99 @@ __device__ int reduce_sum_shfl(thread_block_tile<tileSize> g, int val)
 //     if (tile.thread_rank() == 0) atomicAdd(&y[blockIdx.x], sum);
 // }
 
-// __global__ void kernelGroupAx(DTYPE *a, DTYPE *x, DTYPE *y, int size)
-// {
-//     __shared__ DTYPE cache[maxThreadsPerBlock];
 
-//     DTYPE val = multAx(a, x, size);
+__global__ void kernelReduceGroupShfl(DTYPE *a, DTYPE *y, int size)
+{
 
-//     thread_group g = this_thread_block();
-//     int tileIdx = g.thread_rank() / 32;
-//     DTYPE* t = &cache[32 * tileIdx];
+    // __shared__ DTYPE cache[maxThreadsPerBlock * maxThreadsPerBlock];
 
-//     thread_group tile = tiled_partition(g, 32);
+    dim3 gtid = this_thread_block().thread_index();
+    dim3 gbid = this_thread_block().group_index();
 
-//     DTYPE sum = reduce(tile, t, val);
+    size_t index_src = (gtid.y + blockDim.y * gbid.y) * size + gbid.x * blockDim.x + gtid.x;
+    size_t index_dst = (gtid.y + blockDim.y * gbid.y) * size + gbid.x;
 
-//     if (tile.thread_rank() == 0) atomicAdd(&y[blockIdx.x], sum);
-// }
+    // cache[threadIdx.x + threadIdx.y * maxThreadsPerBlock] = a[index_src];
 
+    thread_block_tile<maxThreadsPerBlock> tile = tiled_partition<maxThreadsPerBlock>(this_thread_block());
+
+    int ttid = tile.thread_rank();
+
+    // printf("a %f \n", cache[threadIdx.x + threadIdx.y * maxThreadsPerBlock]);
+
+    // int row = (threadIdx.y + blockDim.y * blockIdx.y);
+    int row = (gtid.y + blockDim.y * gbid.y);
+
+    DTYPE val = a[index_src];
+    // if( row == 0)
+    //     printf("fill %d %f \n", index_src, val);
+    for (int k = tile.size() / 2; k > 0; k >>= 1)
+    {//if( row == 0)
+              //  printf("k %d \n", k);
+        DTYPE v = tile.shfl_down(val, k);
+
+        printf("shfl %f \n", v);
+        val += tile.shfl_down(val, k);
+            
+    }
+    if (threadIdx.x == 0) 
+    {
+        // printf("a %f \n", val);
+
+        if (gridDim.x == 1)
+        {
+            // printf("a %f \n", a[(threadIdx.y + blockDim.y * blockIdx.y) * size + threadIdx.x]);
+            // printf("a %f \n", cache[0]);
+
+            y[blockIdx.y * blockDim.y + threadIdx.y] = val;
+        }
+        else{
+            a[index_dst] = val;
+        }
+    }
+}
+
+
+
+__global__ void kernelReduceGroup(DTYPE *a, DTYPE *y, int size)
+{
+
+    __shared__ DTYPE cache[maxThreadsPerBlock * maxThreadsPerBlock];
+    size_t index_src = (threadIdx.y + blockDim.y * blockIdx.y) * size + blockIdx.x * blockDim.x + threadIdx.x;
+    size_t index_dst = (threadIdx.y + blockDim.y * blockIdx.y) * size + blockIdx.x;
+
+    thread_block_tile<maxThreadsPerBlock> tile = tiled_partition<maxThreadsPerBlock>(this_thread_block());
+
+
+    cache[threadIdx.x + threadIdx.y * maxThreadsPerBlock] = a[index_src];
+
+    // printf("a %f \n", cache[threadIdx.x + threadIdx.y * maxThreadsPerBlock]);
+
+
+    for (int k = blockDim.x / 2; k > 0; k >>= 1)
+    {
+        if (threadIdx.x < k)
+        {
+            cache[threadIdx.x + threadIdx.y * maxThreadsPerBlock] += cache[threadIdx.x  + threadIdx.y * maxThreadsPerBlock + k];
+        }
+        tile.sync();
+    }
+    if (threadIdx.x == 0) 
+    {
+        // printf("a %f \n", cache[0]);
+
+        if (gridDim.x == 1)
+        {
+            // printf("a %f \n", a[(threadIdx.y + blockDim.y * blockIdx.y) * size + threadIdx.x]);
+            // printf("a %f \n", cache[0]);
+
+            y[blockIdx.y * blockDim.y + threadIdx.y] = cache[0];
+        }
+        else{
+            a[index_dst] = cache[0];
+        }
+    }
+}
 
 __global__ void kernelReduceSimple(DTYPE *a, DTYPE *y, int size)
 {
@@ -245,7 +321,7 @@ bool checkResult(DTYPE *yh, DTYPE *yd, int size)
 int main(int argc, char**argv)
 {
     int i = 1;
-    int t = 4;
+    int t = maxThreadsPerBlock;
     // if (argc>1)
     // {
     //    i=atoi(argv[1]);
@@ -257,8 +333,8 @@ int main(int argc, char**argv)
     //    return -1;
     // }
     // printf("size %i \n", i);
-    int size = 1024 * i;
-    // int size = 64;
+    // int size = 1024 * i;
+    int size = 64;
     // Create data arrays for host
     DTYPE *a_host, *yd_host, *yh_host, *x_host;
     //and device
@@ -344,7 +420,7 @@ int main(int argc, char**argv)
 
         printf("values to reduce %d grid_x %d s threads.x %d\n", values_to_reduce, grid.x, threads.x);
 
-        kernelReduceSimple<<<grid, threads>>>(a_dev, y_dev, size);
+        kernelReduceGroupShfl<<<grid, threads>>>(a_dev, y_dev, size);
         cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
 
         values_to_reduce = grid_x;
