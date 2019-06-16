@@ -15,7 +15,7 @@ using namespace cooperative_groups;
 
 const int threadsPerBlock = 32;
 
-__global__ void kernelReduceGroupShfl(DTYPE *a, DTYPE *y, int size)
+__global__ void kernelReduceGroupShfl(DTYPE *a, DTYPE *y, int size, int values_to_reduce)
 {
     size_t index_src = (threadIdx.y + blockDim.y * blockIdx.y) * size + blockIdx.x * blockDim.x + threadIdx.x;
     size_t index_dst = (threadIdx.y + blockDim.y * blockIdx.y) * size + blockIdx.x;
@@ -24,11 +24,16 @@ __global__ void kernelReduceGroupShfl(DTYPE *a, DTYPE *y, int size)
 
     DTYPE val = a[index_src];
 
+    if (threadIdx.x == values_to_reduce) 
+    {
+        val = 0.0;
+    }
+
     for (int k = blockDim.x / 2; k > 0; k >>= 1)
     {
         val += tile.shfl_down(val, k);
     }
-    
+
     if (threadIdx.x == 0)
     {
         if (gridDim.x == 1)
@@ -42,7 +47,7 @@ __global__ void kernelReduceGroupShfl(DTYPE *a, DTYPE *y, int size)
     }
 }
 
-__global__ void kernelReduceGroup(DTYPE *a, DTYPE *y, int size)
+__global__ void kernelReduceGroup(DTYPE *a, DTYPE *y, int size, int values_to_reduce)
 {
 
     __shared__ DTYPE cache[threadsPerBlock * threadsPerBlock];
@@ -53,6 +58,11 @@ __global__ void kernelReduceGroup(DTYPE *a, DTYPE *y, int size)
     thread_block_tile<threadsPerBlock> tile = tiled_partition<threadsPerBlock>(this_thread_block());
 
     cache[threadIdx.x + threadIdx.y * threadsPerBlock] = a[index_src];
+
+    if (threadIdx.x == values_to_reduce) 
+    {
+        cache[threadIdx.x + threadIdx.y * threadsPerBlock] = 0.0;
+    }
 
     for (int k = blockDim.x / 2; k > 0; k >>= 1)
     {
@@ -75,7 +85,7 @@ __global__ void kernelReduceGroup(DTYPE *a, DTYPE *y, int size)
     }
 }
 
-__global__ void kernelReduceSM(DTYPE *a, DTYPE *y, int size)
+__global__ void kernelReduceSM(DTYPE *a, DTYPE *y, int size, int values_to_reduce)
 {
 
     __shared__ DTYPE cache[threadsPerBlock * threadsPerBlock];
@@ -84,6 +94,11 @@ __global__ void kernelReduceSM(DTYPE *a, DTYPE *y, int size)
     size_t index_dst = (threadIdx.y + blockDim.y * blockIdx.y) * size + blockIdx.x;
 
     cache[threadIdx.x + threadIdx.y * threadsPerBlock] = a[index_src];
+
+    if (threadIdx.x == values_to_reduce) 
+    {
+        cache[threadIdx.x + threadIdx.y * threadsPerBlock] = 0.0;
+    }
 
     for (int k = blockDim.x / 2; k > 0; k >>= 1)
     {
@@ -242,7 +257,7 @@ n=1024*i
 */
 int main(int argc, char**argv)
 {
-    int i = 2;
+    int i = 4;
     // if (argc>1)
     // {
     //    i=atoi(argv[1]);
@@ -277,12 +292,16 @@ int main(int argc, char**argv)
     yd_host = (DTYPE*)malloc(size * sizeof(DTYPE));
     yh_host = (DTYPE*)malloc(size * sizeof(DTYPE));
 
+    DTYPE* copy_a_dev_to_host = (DTYPE*)malloc(size * size * sizeof(DTYPE));
+
     fillA(a_host, size);
     fillX(x_host, size);
 
     // Set CUDA cache config
     // 48kB shared / 16kB local
-    //cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
+    // cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
+    // 16kB shared / 48kB local
+    // cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
 
     // Create CUDA Events
     cudaEventCreate(&start);
@@ -306,10 +325,12 @@ int main(int argc, char**argv)
     dim3 threads(threadsPerBlock, threadsPerBlock);
     dim3 grid(size / threads.x, size / threads.y);
 
-#if 0
+#if 1
     // execute kernelAx and measure Performance
     cudaEventRecord(start, 0);
-    
+    #if 0
+    kernelSimpleAx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
+    #else
     kernelSMAx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
 
     int values_to_reduce = size / threadsPerBlock;
@@ -321,30 +342,35 @@ int main(int argc, char**argv)
     {
         grid = dim3(grid_x, size / threads.y);
 
-        kernelReduceGroupShfl << <grid, threads >> >(a_dev, y_dev, size);
+
+        kernelReduceGroup << <grid, threads >> >(a_dev, y_dev, size, values_to_reduce);
+        cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
 
         values_to_reduce = grid_x;
         threads_x = min(values_to_reduce, threadsPerBlock);
+        if (threads_x % 2 == 1) threads_x += 1;
+
         threads = dim3(threads_x, threadsPerBlock);
-        grid_x = values_to_reduce / threads.x;
+        grid_x = max(values_to_reduce / threads.x, 1);
     }
+    #endif
 
-        cudaEventRecord(end, 0);
-        cudaEventSynchronize(end);
-        cudaEventElapsedTime(&kernelA_time, start, end);
+    cudaEventRecord(end, 0);
+    cudaEventSynchronize(end);
+    cudaEventElapsedTime(&kernelA_time, start, end);
 
-        // Device->Host Memcpy for y_dev -> yd_host
-        cudaEventRecord(start, 0);
-        cudaMemcpy(yd_host, y_dev, size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
-        cudaEventRecord(end, 0);
-        cudaEventSynchronize(end);
+    // Device->Host Memcpy for y_dev -> yd_host
+    cudaEventRecord(start, 0);
+    cudaMemcpy(yd_host, y_dev, size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+    cudaEventRecord(end, 0);
+    cudaEventSynchronize(end);
 
-        // Check Ax result
-        hostAx(a_host, x_host, yh_host, size);
-        checkResult(yh_host, yd_host, size);
-        printf("\n");
+    // Check Ax result
+    hostAx(a_host, x_host, yh_host, size);
+    checkResult(yh_host, yd_host, size);
+    printf("\n");
 
-        cudaEventElapsedTime(&dth_time, start, end);
+    cudaEventElapsedTime(&dth_time, start, end);
 
 #else
     // execute kernelAx and measure Performance
@@ -384,7 +410,6 @@ int main(int argc, char**argv)
 
     cudaEventElapsedTime(&dth_time, start, end);
 
-
 #endif
 
     printf("GPU timing in ms: h->d: %f kernelAx: %f kernelATx: %f d->h: %f\n", htd_time, kernelA_time, kernelAT_time, dth_time);
@@ -397,5 +422,9 @@ int main(int argc, char**argv)
     free(a_host);
     free(x_host);
     free(yh_host);
-    free(yd_host);
+    free(yd_host); 
+
+    // Destroy CUDA events
+    cudaEventDestroy(start);
+    cudaEventDestroy(end);
 }
