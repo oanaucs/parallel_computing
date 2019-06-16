@@ -294,8 +294,6 @@ int main(int argc, char**argv)
     cudaMalloc((void**)&x_dev, size * sizeof(DTYPE));
     cudaMalloc((void**)&y_dev, size * sizeof(DTYPE));
 
-    // DTYPE* copy_a_dev_to_host = (DTYPE*)malloc(size * size * sizeof(DTYPE));
-
     // Host->Device Memcpy from A and x + performance measurement
     cudaEventRecord(start, 0);
     cudaMemcpy(x_dev, x_host, size * sizeof(DTYPE), cudaMemcpyHostToDevice);
@@ -309,49 +307,27 @@ int main(int argc, char**argv)
     dim3 threads(threadsPerBlock, threadsPerBlock);
     dim3 grid(size / threads.x, size / threads.y);
 
-#if 1
+#if 0
     // execute kernelAx and measure Performance
     cudaEventRecord(start, 0);
+    
     kernelSMAx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
-
-    //cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
-
-    // for(unsigned y = 0; y != size; ++y){
-    //     std::cout <<  std::endl << y << ": ";
-    //std::cout << std::endl;
-//    for (unsigned x = 0; x != size; ++x) {
-       // size_t index = x;
-        //std::cout << copy_a_dev_to_host[index] << " ";
-    //}
-    // }
 
     int values_to_reduce = size / threadsPerBlock;
     int threads_x = min(values_to_reduce, threadsPerBlock);
     threads = dim3(threads_x, threadsPerBlock);
     int grid_x = values_to_reduce / threads.x;
 
-    //printf("\nvalues to reduce %d grid %d \n", values_to_reduce, grid_x);
-
     while (values_to_reduce > 1)
     {
         grid = dim3(grid_x, size / threads.y);
 
-        //printf("values to reduce %d grid_x %d s threads.x %d\n", values_to_reduce, grid.x, threads.x);
-
         kernelReduceGroupShfl << <grid, threads >> >(a_dev, y_dev, size);
-        //cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
 
         values_to_reduce = grid_x;
         threads_x = min(values_to_reduce, threadsPerBlock);
         threads = dim3(threads_x, threadsPerBlock);
         grid_x = values_to_reduce / threads.x;
-
-        //std::cout << std::endl;
-        //for (unsigned x = 0; x != size; ++x) {
-        //    size_t index = x;
-        //    std::cout << copy_a_dev_to_host[index] << " ";
-        //}
-        //std::cout << std::endl;
     }
 
         cudaEventRecord(end, 0);
@@ -374,46 +350,24 @@ int main(int argc, char**argv)
 #else
     // execute kernelAx and measure Performance
     cudaEventRecord(start, 0);
-    kernelSMAx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
-
-    //cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
-
-    // for(unsigned y = 0; y != size; ++y){
-    //     std::cout <<  std::endl << y << ": ";
-    //std::cout << std::endl;
-    //    for (unsigned x = 0; x != size; ++x) {
-    // size_t index = x;
-    //std::cout << copy_a_dev_to_host[index] << " ";
-    //}
-    // }
+    
+    kernelSMATx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
 
     int values_to_reduce = size / threadsPerBlock;
     int threads_x = min(values_to_reduce, threadsPerBlock);
     threads = dim3(threads_x, threadsPerBlock);
     int grid_x = values_to_reduce / threads.x;
 
-    //printf("\nvalues to reduce %d grid %d \n", values_to_reduce, grid_x);
-
     while (values_to_reduce > 1)
     {
         grid = dim3(grid_x, size / threads.y);
 
-        //printf("values to reduce %d grid_x %d s threads.x %d\n", values_to_reduce, grid.x, threads.x);
-
         kernelReduceGroupShfl << <grid, threads >> >(a_dev, y_dev, size);
-        //cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
 
         values_to_reduce = grid_x;
         threads_x = min(values_to_reduce, threadsPerBlock);
         threads = dim3(threads_x, threadsPerBlock);
         grid_x = values_to_reduce / threads.x;
-
-        //std::cout << std::endl;
-        //for (unsigned x = 0; x != size; ++x) {
-        //    size_t index = x;
-        //    std::cout << copy_a_dev_to_host[index] << " ";
-        //}
-        //std::cout << std::endl;
     }
 
     cudaEventRecord(end, 0);
@@ -430,10 +384,12 @@ int main(int argc, char**argv)
     hostATx(a_host, x_host, yh_host, size);
     checkResult(yh_host, yd_host, size);
     printf("\n");
-    
+
     cudaEventElapsedTime(&dth_time, start, end);
+
+
 #endif
-    
+
     printf("GPU timing in ms: h->d: %f kernelAx: %f kernelATx: %f d->h: %f\n", htd_time, kernelA_time, kernelAT_time, dth_time);
 
     // Free memory (Host and Device)
