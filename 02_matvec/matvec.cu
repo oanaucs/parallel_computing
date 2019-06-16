@@ -13,7 +13,7 @@ using namespace cooperative_groups;
 
 #define DTYPE float
 
-const int threadsPerBlock = 4;
+const int threadsPerBlock = 32;
 
 __global__ void kernelReduceGroupShfl(DTYPE *a, DTYPE *y, int size)
 {
@@ -24,12 +24,11 @@ __global__ void kernelReduceGroupShfl(DTYPE *a, DTYPE *y, int size)
 
     DTYPE val = a[index_src];
 
-    for (int k = tile.size() / 2; k > 0; k >>= 1)
+    for (int k = blockDim.x / 2; k > 0; k >>= 1)
     {
-        DTYPE v = tile.shfl_down(val, k);
         val += tile.shfl_down(val, k);
-
     }
+    
     if (threadIdx.x == 0)
     {
         if (gridDim.x == 1)
@@ -243,7 +242,7 @@ n=1024*i
 */
 int main(int argc, char**argv)
 {
-    int i = 1;
+    int i = 2;
     // if (argc>1)
     // {
     //    i=atoi(argv[1]);
@@ -255,8 +254,8 @@ int main(int argc, char**argv)
     //    return -1;
     // }
     // printf("size %i \n", i);
-    // int size = 1024 * i;
-    int size = 64;
+    int size = 1024 * i;
+    // int size = 64;
     // Create data arrays for host
     DTYPE *a_host, *yd_host, *yh_host, *x_host;
     //and device
@@ -350,8 +349,8 @@ int main(int argc, char**argv)
 #else
     // execute kernelAx and measure Performance
     cudaEventRecord(start, 0);
-    
-    kernelSMATx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
+    kernelSMAx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
+    cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
 
     int values_to_reduce = size / threadsPerBlock;
     int threads_x = min(values_to_reduce, threadsPerBlock);
@@ -361,15 +360,13 @@ int main(int argc, char**argv)
     while (values_to_reduce > 1)
     {
         grid = dim3(grid_x, size / threads.y);
-
         kernelReduceGroupShfl << <grid, threads >> >(a_dev, y_dev, size);
-
         values_to_reduce = grid_x;
         threads_x = min(values_to_reduce, threadsPerBlock);
         threads = dim3(threads_x, threadsPerBlock);
         grid_x = values_to_reduce / threads.x;
-    }
 
+    }
     cudaEventRecord(end, 0);
     cudaEventSynchronize(end);
     cudaEventElapsedTime(&kernelAT_time, start, end);
