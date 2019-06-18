@@ -301,7 +301,7 @@ int main(int argc, char**argv)
     // 48kB shared / 16kB local
     // cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
     // 16kB shared / 48kB local
-    // cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
+    cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
 
     // Create CUDA Events
     cudaEventCreate(&start);
@@ -325,7 +325,7 @@ int main(int argc, char**argv)
     dim3 threads(threadsPerBlock, threadsPerBlock);
     dim3 grid(size / threads.x, size / threads.y);
 
-#if 1
+#if 0
     // execute kernelAx and measure Performance
     cudaEventRecord(start, 0);
     #if 0
@@ -342,8 +342,7 @@ int main(int argc, char**argv)
     {
         grid = dim3(grid_x, size / threads.y);
 
-
-        kernelReduceGroup << <grid, threads >> >(a_dev, y_dev, size, values_to_reduce);
+        kernelReduceSM << <grid, threads >> >(a_dev, y_dev, size, values_to_reduce);
         cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
 
         values_to_reduce = grid_x;
@@ -375,8 +374,11 @@ int main(int argc, char**argv)
 #else
     // execute kernelAx and measure Performance
     cudaEventRecord(start, 0);
-    kernelSMAx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
-    cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+    #if 0
+    kernelSimpleATx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
+    
+    #else
+    kernelSMATx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
 
     int values_to_reduce = size / threadsPerBlock;
     int threads_x = min(values_to_reduce, threadsPerBlock);
@@ -386,13 +388,16 @@ int main(int argc, char**argv)
     while (values_to_reduce > 1)
     {
         grid = dim3(grid_x, size / threads.y);
-        kernelReduceGroupShfl << <grid, threads >> >(a_dev, y_dev, size);
+        kernelReduceGroupShfl << <grid, threads >> >(a_dev, y_dev, size, values_to_reduce);
         values_to_reduce = grid_x;
         threads_x = min(values_to_reduce, threadsPerBlock);
-        threads = dim3(threads_x, threadsPerBlock);
-        grid_x = values_to_reduce / threads.x;
+        if (threads_x % 2 == 1) threads_x += 1;
 
+        threads = dim3(threads_x, threadsPerBlock);
+        grid_x = max(values_to_reduce / threads.x, 1);
     }
+    #endif
+
     cudaEventRecord(end, 0);
     cudaEventSynchronize(end);
     cudaEventElapsedTime(&kernelAT_time, start, end);
