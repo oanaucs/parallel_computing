@@ -251,24 +251,23 @@ bool checkResult(DTYPE *yh, DTYPE *yd, int size)
 
 /*
 Main Routine:
-Input: i,[threads]
+Input: i (threads are fixed due to grid tiles generation)
 Compute A*x=y on the GPU where A is of size R^{n x n} with
 n=1024*i
 */
 int main(int argc, char**argv)
 {
     int i = 4;
-    // if (argc>1)
-    // {
-    //    i=atoi(argv[1]);
-    //    if (argc>2) t=atoi(argv[2]);
-    // }
-    // else 
-    // {
-    //    printf("Usage: %s i [threads] \n",argv[0]);
-    //    return -1;
-    // }
-    // printf("size %i \n", i);
+    if (argc>1)
+    {
+       i=atoi(argv[1]);
+    }
+    else 
+    {
+       printf("Usage: %s i [threads] \n",argv[0]);
+       return -1;
+    }
+    printf("size %i \n", i);
     int size = 1024 * i;
     // int size = 64;
     // Create data arrays for host
@@ -285,6 +284,8 @@ int main(int argc, char**argv)
     //kernelA, kernelAT
     float kernelA_time = 0.0;
     float kernelAT_time = 0.0;
+    // variables for kernel repetition
+    int values_to_reduce, threads_x, grid_x;
 
     // Allocate Host Memory and fill A and x
     a_host = (DTYPE*)malloc(size * size * sizeof(DTYPE));
@@ -292,7 +293,7 @@ int main(int argc, char**argv)
     yd_host = (DTYPE*)malloc(size * sizeof(DTYPE));
     yh_host = (DTYPE*)malloc(size * sizeof(DTYPE));
 
-    DTYPE* copy_a_dev_to_host = (DTYPE*)malloc(size * size * sizeof(DTYPE));
+    //DTYPE* copy_a_dev_to_host = (DTYPE*)malloc(size * size * sizeof(DTYPE));
 
     fillA(a_host, size);
     fillX(x_host, size);
@@ -325,25 +326,25 @@ int main(int argc, char**argv)
     dim3 threads(threadsPerBlock, threadsPerBlock);
     dim3 grid(size / threads.x, size / threads.y);
 
-#if 0
     // execute kernelAx and measure Performance
     cudaEventRecord(start, 0);
+    // set to 1 for the naive implementation
     #if 0
     kernelSimpleAx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
     #else
     kernelSMAx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
 
-    int values_to_reduce = size / threadsPerBlock;
-    int threads_x = min(values_to_reduce, threadsPerBlock);
+    values_to_reduce = size / threadsPerBlock;
+    threads_x = min(values_to_reduce, threadsPerBlock);
     threads = dim3(threads_x, threadsPerBlock);
-    int grid_x = values_to_reduce / threads.x;
+    grid_x = values_to_reduce / threads.x;
 
     while (values_to_reduce > 1)
     {
         grid = dim3(grid_x, size / threads.y);
 
         kernelReduceSM << <grid, threads >> >(a_dev, y_dev, size, values_to_reduce);
-        cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+        //cudaMemcpy(copy_a_dev_to_host, a_dev, size*size * sizeof(DTYPE), cudaMemcpyDeviceToHost);
 
         values_to_reduce = grid_x;
         threads_x = min(values_to_reduce, threadsPerBlock);
@@ -371,19 +372,22 @@ int main(int argc, char**argv)
 
     cudaEventElapsedTime(&dth_time, start, end);
 
-#else
-    // execute kernelAx and measure Performance
+    // clear previously allocated memory
+    cudaDeviceReset();
+
+    // execute kernelAx and measure performance
     cudaEventRecord(start, 0);
+    // set to 1 for the naive implementation
     #if 0
     kernelSimpleATx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
     
     #else
     kernelSMATx << <grid, threads >> >(a_dev, x_dev, y_dev, size);
 
-    int values_to_reduce = size / threadsPerBlock;
-    int threads_x = min(values_to_reduce, threadsPerBlock);
+    values_to_reduce = size / threadsPerBlock;
+    threads_x = min(values_to_reduce, threadsPerBlock);
     threads = dim3(threads_x, threadsPerBlock);
-    int grid_x = values_to_reduce / threads.x;
+    grid_x = values_to_reduce / threads.x;
 
     while (values_to_reduce > 1)
     {
@@ -414,8 +418,6 @@ int main(int argc, char**argv)
     printf("\n");
 
     cudaEventElapsedTime(&dth_time, start, end);
-
-#endif
 
     printf("GPU timing in ms: h->d: %f kernelAx: %f kernelATx: %f d->h: %f\n", htd_time, kernelA_time, kernelAT_time, dth_time);
 
